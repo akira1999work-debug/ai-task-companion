@@ -256,7 +256,7 @@ export default function SettingsScreen() {
             />
             <View style={styles.settingText}>
               <Text variant="bodyLarge" style={{ color: theme.colors.onSurface }}>
-                AI Task Companion
+                アイタス
               </Text>
               <Text variant="bodySmall" style={{ color: theme.colors.outline }}>
                 バージョン 0.1.0 (プロトタイプ)

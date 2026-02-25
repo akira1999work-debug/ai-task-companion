@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "AI Task Companion",
-    "slug": "ai-task-companion",
+    "name": "アイタス",
+    "slug": "aitas",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

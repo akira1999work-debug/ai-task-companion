@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 export default function App() {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>AI Task Companion</Text>
+      <Text style={styles.title}>アイタス</Text>
       <Text style={styles.subtitle}>Loading...</Text>
       <StatusBar style="auto" />
     </View>
