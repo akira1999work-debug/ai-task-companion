@@ -1,32 +1,26 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { PaperProvider } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
+import { AppProvider, useApp } from './src/context/AppContext';
+import AppNavigator from './src/navigation/AppNavigator';
+import { themes } from './src/theme';
 
-export default function App() {
+function ThemedApp() {
+  const { personality } = useApp();
+  const theme = themes[personality];
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>アイタス</Text>
-      <Text style={styles.subtitle}>Loading...</Text>
-      <StatusBar style="auto" />
-    </View>
+    <PaperProvider theme={theme}>
+      <AppNavigator />
+      <StatusBar style={personality === 'maji' ? 'light' : 'auto'} />
+    </PaperProvider>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#6366F1',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#94A3B8',
-    marginTop: 8,
-  },
-});
+export default function App() {
+  return (
+    <AppProvider>
+      <ThemedApp />
+    </AppProvider>
+  );
+}
