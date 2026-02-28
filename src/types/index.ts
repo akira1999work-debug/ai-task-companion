@@ -1,5 +1,8 @@
 // Task types
 export type TaskType = 'routine' | 'normal' | 'urgent';
+export type PortfolioType = 'drive' | 'maintenance' | 'recharge';
+export type InferenceStatus = 'pending' | 'completed' | 'failed';
+export type SuperGoalStatus = 'active' | 'completed' | 'archived';
 
 export interface SubTask {
   id: string;
@@ -23,6 +26,11 @@ export interface Task {
   originalDueDate?: string;
   rescheduleCount: number;
   categoryId?: string;
+  portfolioType?: PortfolioType;
+  isSanctuary?: boolean;
+  aiReviewCache?: string;           // JSON.stringify(AiReviewResult)
+  inferenceStatus?: InferenceStatus;
+  superGoalId?: string;
 }
 
 // Reschedule reason types
@@ -88,3 +96,62 @@ export type RootStackParamList = {
   Settings: undefined;
   TaskDetail: { taskId: string };
 };
+
+// ---------------------------------------------------------------------------
+// AI Review types
+// ---------------------------------------------------------------------------
+
+export interface AiReviewPerspective {
+  score: number;        // 0-100
+  summary: string;      // 1行の評価テキスト
+  suggestion?: string;  // 改善提案（あれば）
+}
+
+export interface AiReviewResult {
+  necessity: AiReviewPerspective;
+  feasibility: AiReviewPerspective;
+  decomposition: AiReviewPerspective & {
+    suggestedSubTasks?: string[];  // 分解提案のサブタスク名リスト
+  };
+  efficiency: AiReviewPerspective;
+  overallScore: number;            // 加重平均スコア
+  isSanctuary: boolean;            // 聖域判定でスキップされたか
+  sanctuaryMessage?: string;       // 聖域の場合の肯定メッセージ
+  reviewedAt: string;              // ISO timestamp
+}
+
+// ---------------------------------------------------------------------------
+// Super Goals
+// ---------------------------------------------------------------------------
+
+export interface SuperGoal {
+  id: string;
+  categoryId?: string;
+  title: string;
+  description?: string;
+  targetDate?: string;
+  status: SuperGoalStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Pending Suggestions
+// ---------------------------------------------------------------------------
+
+export interface PendingSuggestion {
+  id: string;
+  taskId?: string;
+  suggestedTagName: string;
+  reason?: string;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// AI Review Weights
+// ---------------------------------------------------------------------------
+
+export interface AiReviewWeights {
+  necessity: number;      // 0.0 ~ 2.0
+  feasibility: number;
+  decomposition: number;
+  efficiency: number;
+}
