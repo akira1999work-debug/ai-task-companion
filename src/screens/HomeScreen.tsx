@@ -33,6 +33,7 @@ import { generateId } from '../db/database';
 import { sendMessage } from '../services/aiProvider';
 import { useSortedTasks } from '../hooks/useSortedTasks';
 import { calcDisplayScore } from '../services/displayScore';
+import { getGlowStyle } from '../utils/glowColor';
 import type { Task } from '../types';
 import type { TaskCategory } from '../types/onboarding';
 
@@ -341,11 +342,16 @@ export default function HomeScreen() {
         {focusTask ? (
           <View>
             {/* Focus card */}
-            <Surface style={[styles.focusCard, { backgroundColor: theme.colors.surface }]} elevation={3}>
-              {/* Category color accent bar */}
+            {(function () {
+              var ft = focusTask!;
+              var glow = getGlowStyle(ft.task);
+              return (
+            <Pressable onPress={function () { navigation.navigate('TaskDetail', { taskId: ft.task.id }); }}>
+            <Surface style={[styles.focusCard, { backgroundColor: theme.colors.surface, shadowColor: glow.shadowColor, shadowOpacity: glow.shadowOpacity, shadowRadius: glow.shadowRadius, shadowOffset: { width: 0, height: 2 }, elevation: 3 }]} elevation={3}>
+              {/* Glow accent bar */}
               <View style={[
                 styles.accentBar,
-                { backgroundColor: focusTask.category ? focusTask.category.color : theme.colors.primary },
+                { backgroundColor: glow.color },
               ]} />
               <View style={styles.focusContent}>
                 {/* Category chip */}
@@ -388,14 +394,19 @@ export default function HomeScreen() {
                 </View>
               </View>
             </Surface>
+            </Pressable>
+              );
+            })()}
 
             {/* Fading next tasks */}
             {nextTasks.length > 0 && (
               <View style={styles.nextTasksList}>
                 {nextTasks.map(function (st, index) {
                   var opacity = FADE_OPACITIES[index] || 0.2;
+                  var nextGlow = getGlowStyle(st.task);
                   return (
                     <View key={st.task.id} style={[styles.nextTaskRow, { opacity: opacity }]}>
+                      <View style={[styles.glowDot, { backgroundColor: nextGlow.color }]} />
                       <Text style={[styles.nextTaskTitle, { color: theme.colors.onSurface }]} numberOfLines={1}>
                         {st.task.title}
                       </Text>
@@ -689,6 +700,12 @@ var styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
     paddingHorizontal: 4,
+  },
+  glowDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    marginRight: 8,
   },
   nextTaskTitle: {
     flex: 1,

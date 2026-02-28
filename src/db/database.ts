@@ -1,5 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-import type { Task, SubTask, ChatMessage, TaskType, RescheduleReason } from '../types';
+import type { Task, SubTask, ChatMessage, TaskType, RescheduleReason, PortfolioType, InferenceStatus, SuperGoal, SuperGoalStatus, PendingSuggestion } from '../types';
 import type { TaskCategory, UserProfile, ScalingWeight } from '../types/onboarding';
 
 // ---------------------------------------------------------------------------
@@ -22,6 +22,11 @@ interface TaskRow {
   original_due_date: string | null;
   reschedule_count: number;
   category_id: string | null;
+  portfolio_type: string;
+  is_sanctuary: number;
+  ai_review_cache: string | null;
+  inference_status: string;
+  super_goal_id: string | null;
 }
 
 interface RescheduleHistoryRow {
@@ -65,6 +70,23 @@ interface UserProfileRow {
   interests: string;
   goals: string;
   age_group: string | null;
+  created_at: string;
+}
+
+interface SuperGoalRow {
+  id: string;
+  category_id: string | null;
+  title: string;
+  description: string | null;
+  target_date: string | null;
+  status: string;
+}
+
+interface PendingSuggestionRow {
+  id: string;
+  task_id: string | null;
+  suggested_tag_name: string;
+  reason: string | null;
   created_at: string;
 }
 
@@ -113,6 +135,11 @@ export function mapRowToTask(row: TaskRow, subTasks: SubTask[]): Task {
     originalDueDate: row.original_due_date ?? undefined,
     rescheduleCount: row.reschedule_count || 0,
     categoryId: row.category_id ?? undefined,
+    portfolioType: (row.portfolio_type || 'maintenance') as PortfolioType,
+    isSanctuary: intToBool(row.is_sanctuary),
+    aiReviewCache: row.ai_review_cache ?? undefined,
+    inferenceStatus: (row.inference_status || 'completed') as InferenceStatus,
+    superGoalId: row.super_goal_id ?? undefined,
   };
 }
 
@@ -163,6 +190,11 @@ export async function initializeDatabase(db: SQLiteDatabase): Promise<void> {
     'ALTER TABLE tasks ADD COLUMN reschedule_count INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE tasks ADD COLUMN category_id TEXT',
     'ALTER TABLE categories ADD COLUMN parent_id TEXT',
+    "ALTER TABLE tasks ADD COLUMN portfolio_type TEXT NOT NULL DEFAULT 'maintenance'",
+    'ALTER TABLE tasks ADD COLUMN is_sanctuary INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE tasks ADD COLUMN ai_review_cache TEXT',
+    "ALTER TABLE tasks ADD COLUMN inference_status TEXT NOT NULL DEFAULT 'completed'",
+    'ALTER TABLE tasks ADD COLUMN super_goal_id TEXT',
   ];
   for (const sql of migrations) {
     try {
@@ -233,6 +265,27 @@ export async function initializeDatabase(db: SQLiteDatabase): Promise<void> {
     );
   `);
 
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS super_goals (
+      id          TEXT PRIMARY KEY NOT NULL,
+      category_id TEXT,
+      title       TEXT NOT NULL,
+      description TEXT,
+      target_date TEXT,
+      status      TEXT NOT NULL DEFAULT 'active'
+    );
+  `);
+
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS pending_suggestions (
+      id                 TEXT PRIMARY KEY NOT NULL,
+      task_id            TEXT,
+      suggested_tag_name TEXT NOT NULL,
+      reason             TEXT,
+      created_at         TEXT NOT NULL
+    );
+  `);
+
   // Default settings (only inserted when the key doesn't already exist)
   await db.runAsync(
     'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
@@ -266,6 +319,28 @@ export async function initializeDatabase(db: SQLiteDatabase): Promise<void> {
     'geminiApiKey',
     '',
   );
+
+  // AI review defaults
+  await db.runAsync(
+    'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
+    'ai_review_weights',
+    '{"necessity":1,"feasibility":1,"decomposition":1,"efficiency":1}',
+  );
+  await db.runAsync(
+    'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
+    'sanctuary_keywords',
+    '[]',
+  );
+  await db.runAsync(
+    'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
+    'ai_subcategory_suggestions',
+    '1',
+  );
+  await db.runAsync(
+    'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
+    'insight_visualization_style',
+    'tiles',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -296,8 +371,8 @@ export async function getAllTasks(db: SQLiteDatabase): Promise<Task[]> {
 export async function insertTask(db: SQLiteDatabase, task: Task): Promise<void> {
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      `INSERT INTO tasks (id, user_id, title, description, completed, due_date, priority, is_recurring, recurring_pattern, created_at, task_type, completed_at, original_due_date, reschedule_count, category_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (id, user_id, title, description, completed, due_date, priority, is_recurring, recurring_pattern, created_at, task_type, completed_at, original_due_date, reschedule_count, category_id, portfolio_type, is_sanctuary, ai_review_cache, inference_status, super_goal_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       task.id,
       DEFAULT_USER_ID,
       task.title,
@@ -313,6 +388,11 @@ export async function insertTask(db: SQLiteDatabase, task: Task): Promise<void> 
       task.originalDueDate ?? task.dueDate ?? null,
       task.rescheduleCount || 0,
       task.categoryId ?? null,
+      task.portfolioType || 'maintenance',
+      boolToInt(task.isSanctuary || false),
+      task.aiReviewCache ?? null,
+      task.inferenceStatus || 'completed',
+      task.superGoalId ?? null,
     );
 
     for (const sub of task.subTasks) {
@@ -597,5 +677,292 @@ export async function insertUserProfile(db: SQLiteDatabase, profile: UserProfile
     JSON.stringify(profile.goals),
     profile.ageGroup ?? null,
     profile.createdAt,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Task extended field updates
+// ---------------------------------------------------------------------------
+
+export async function updateTaskPortfolioType(
+  db: SQLiteDatabase,
+  taskId: string,
+  portfolioType: PortfolioType,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE tasks SET portfolio_type = ? WHERE id = ?',
+    portfolioType,
+    taskId,
+  );
+}
+
+export async function updateTaskSanctuary(
+  db: SQLiteDatabase,
+  taskId: string,
+  isSanctuary: boolean,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE tasks SET is_sanctuary = ? WHERE id = ?',
+    boolToInt(isSanctuary),
+    taskId,
+  );
+}
+
+export async function updateTaskAiReviewCache(
+  db: SQLiteDatabase,
+  taskId: string,
+  cacheJson: string | null,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE tasks SET ai_review_cache = ? WHERE id = ?',
+    cacheJson,
+    taskId,
+  );
+}
+
+export async function updateTaskInferenceStatus(
+  db: SQLiteDatabase,
+  taskId: string,
+  status: string,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE tasks SET inference_status = ? WHERE id = ?',
+    status,
+    taskId,
+  );
+}
+
+export async function updateTaskSuperGoalId(
+  db: SQLiteDatabase,
+  taskId: string,
+  superGoalId: string | null,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE tasks SET super_goal_id = ? WHERE id = ?',
+    superGoalId,
+    taskId,
+  );
+}
+
+export async function getTasksByInferenceStatus(
+  db: SQLiteDatabase,
+  status: string,
+): Promise<Task[]> {
+  const taskRows = await db.getAllAsync<TaskRow>(
+    'SELECT * FROM tasks WHERE inference_status = ? ORDER BY created_at DESC',
+    status,
+  );
+
+  const subTaskRows = await db.getAllAsync<SubTaskRow>(
+    'SELECT * FROM sub_tasks',
+  );
+
+  const subTasksByTaskId = new Map<string, SubTask[]>();
+  for (const row of subTaskRows) {
+    const list = subTasksByTaskId.get(row.task_id) || [];
+    list.push(mapRowToSubTask(row));
+    subTasksByTaskId.set(row.task_id, list);
+  }
+
+  return taskRows.map((row) =>
+    mapRowToTask(row, subTasksByTaskId.get(row.id) || []),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Super Goals
+// ---------------------------------------------------------------------------
+
+function mapRowToSuperGoal(row: SuperGoalRow): SuperGoal {
+  return {
+    id: row.id,
+    categoryId: row.category_id ?? undefined,
+    title: row.title,
+    description: row.description ?? undefined,
+    targetDate: row.target_date ?? undefined,
+    status: row.status as SuperGoalStatus,
+  };
+}
+
+export async function getAllSuperGoals(db: SQLiteDatabase): Promise<SuperGoal[]> {
+  const rows = await db.getAllAsync<SuperGoalRow>(
+    'SELECT * FROM super_goals ORDER BY rowid ASC',
+  );
+  return rows.map(mapRowToSuperGoal);
+}
+
+export async function insertSuperGoal(db: SQLiteDatabase, goal: SuperGoal): Promise<void> {
+  await db.runAsync(
+    'INSERT INTO super_goals (id, category_id, title, description, target_date, status) VALUES (?, ?, ?, ?, ?, ?)',
+    goal.id,
+    goal.categoryId ?? null,
+    goal.title,
+    goal.description ?? null,
+    goal.targetDate ?? null,
+    goal.status,
+  );
+}
+
+export async function updateSuperGoal(db: SQLiteDatabase, goal: SuperGoal): Promise<void> {
+  await db.runAsync(
+    'UPDATE super_goals SET category_id = ?, title = ?, description = ?, target_date = ?, status = ? WHERE id = ?',
+    goal.categoryId ?? null,
+    goal.title,
+    goal.description ?? null,
+    goal.targetDate ?? null,
+    goal.status,
+    goal.id,
+  );
+}
+
+export async function deleteSuperGoalById(db: SQLiteDatabase, goalId: string): Promise<void> {
+  await db.runAsync('DELETE FROM super_goals WHERE id = ?', goalId);
+}
+
+// ---------------------------------------------------------------------------
+// Pending Suggestions
+// ---------------------------------------------------------------------------
+
+function mapRowToPendingSuggestion(row: PendingSuggestionRow): PendingSuggestion {
+  return {
+    id: row.id,
+    taskId: row.task_id ?? undefined,
+    suggestedTagName: row.suggested_tag_name,
+    reason: row.reason ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+
+export async function getAllPendingSuggestions(db: SQLiteDatabase): Promise<PendingSuggestion[]> {
+  const rows = await db.getAllAsync<PendingSuggestionRow>(
+    'SELECT * FROM pending_suggestions ORDER BY created_at DESC',
+  );
+  return rows.map(mapRowToPendingSuggestion);
+}
+
+export async function insertPendingSuggestion(db: SQLiteDatabase, suggestion: PendingSuggestion): Promise<void> {
+  await db.runAsync(
+    'INSERT INTO pending_suggestions (id, task_id, suggested_tag_name, reason, created_at) VALUES (?, ?, ?, ?, ?)',
+    suggestion.id,
+    suggestion.taskId ?? null,
+    suggestion.suggestedTagName,
+    suggestion.reason ?? null,
+    suggestion.createdAt,
+  );
+}
+
+export async function deletePendingSuggestionById(db: SQLiteDatabase, suggestionId: string): Promise<void> {
+  await db.runAsync('DELETE FROM pending_suggestions WHERE id = ?', suggestionId);
+}
+
+export async function countRecentSuggestionsByName(
+  db: SQLiteDatabase,
+  tagName: string,
+  sinceDaysAgo: number,
+): Promise<number> {
+  const since = new Date();
+  since.setDate(since.getDate() - sinceDaysAgo);
+  const sinceStr = since.toISOString();
+
+  const row = await db.getFirstAsync<{ cnt: number }>(
+    'SELECT COUNT(*) as cnt FROM pending_suggestions WHERE suggested_tag_name = ? AND created_at >= ?',
+    tagName,
+    sinceStr,
+  );
+  return row ? row.cnt : 0;
+}
+
+export async function countUncategorizedTasksInCategory(
+  db: SQLiteDatabase,
+  categoryId: string,
+): Promise<number> {
+  // Count tasks whose category_id matches the default category
+  const row = await db.getFirstAsync<{ cnt: number }>(
+    'SELECT COUNT(*) as cnt FROM tasks WHERE category_id = ?',
+    categoryId,
+  );
+  return row ? row.cnt : 0;
+}
+
+// ---------------------------------------------------------------------------
+// SubTask individual CRUD
+// ---------------------------------------------------------------------------
+
+export async function insertSubTask(
+  db: SQLiteDatabase,
+  taskId: string,
+  subTask: SubTask,
+): Promise<void> {
+  await db.runAsync(
+    'INSERT INTO sub_tasks (id, task_id, title, completed) VALUES (?, ?, ?, ?)',
+    subTask.id,
+    taskId,
+    subTask.title,
+    boolToInt(subTask.completed),
+  );
+}
+
+export async function bulkInsertSubTasks(
+  db: SQLiteDatabase,
+  taskId: string,
+  subTasks: SubTask[],
+): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    for (const sub of subTasks) {
+      await db.runAsync(
+        'INSERT INTO sub_tasks (id, task_id, title, completed) VALUES (?, ?, ?, ?)',
+        sub.id,
+        taskId,
+        sub.title,
+        boolToInt(sub.completed),
+      );
+    }
+  });
+}
+
+export async function updateSubTaskCompleted(
+  db: SQLiteDatabase,
+  subTaskId: string,
+  completed: boolean,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE sub_tasks SET completed = ? WHERE id = ?',
+    boolToInt(completed),
+    subTaskId,
+  );
+}
+
+export async function deleteSubTaskById(
+  db: SQLiteDatabase,
+  subTaskId: string,
+): Promise<void> {
+  await db.runAsync('DELETE FROM sub_tasks WHERE id = ?', subTaskId);
+}
+
+// ---------------------------------------------------------------------------
+// Task individual field updates
+// ---------------------------------------------------------------------------
+
+export async function updateTaskTitle(
+  db: SQLiteDatabase,
+  taskId: string,
+  title: string,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE tasks SET title = ? WHERE id = ?',
+    title,
+    taskId,
+  );
+}
+
+export async function updateTaskDueDate(
+  db: SQLiteDatabase,
+  taskId: string,
+  dueDate: string | null,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE tasks SET due_date = ? WHERE id = ?',
+    dueDate,
+    taskId,
   );
 }

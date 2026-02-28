@@ -10,6 +10,7 @@ import TaskListScreen from '../screens/TaskListScreen';
 import ReviewScreen from '../screens/ReviewScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
+import TaskDetailScreen from '../screens/TaskDetailScreen';
 import { useApp } from '../context/AppContext';
 import type { RootTabParamList, RootStackParamList } from '../types';
 
@@ -100,6 +101,14 @@ export default function AppNavigator() {
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="TaskDetail"
+          component={TaskDetailScreen}
+          options={{
+            presentation: 'card',
+            animation: 'slide_from_right',
           }}
         />
       </Stack.Navigator>

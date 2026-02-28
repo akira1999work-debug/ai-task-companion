@@ -128,6 +128,7 @@ export default function SettingsScreen() {
     personality, setPersonality,
     googleCalendarEnabled, setGoogleCalendarEnabled,
     aiConfig, setConnectionMode, setOllamaHost, setOllamaPort, setGeminiApiKey,
+    insightVisualizationStyle, setInsightVisualizationStyle,
   } = useApp();
 
   const [localHost, setLocalHost] = useState(aiConfig.ollamaHost);
@@ -294,6 +295,49 @@ export default function SettingsScreen() {
             />
           </Surface>
         )}
+
+        <Divider style={styles.divider} />
+
+        {/* Display settings section */}
+        <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>
+          表示設定
+        </Text>
+
+        <Surface style={[styles.settingRow, { backgroundColor: theme.colors.surface, flexDirection: 'column', alignItems: 'stretch' }]} elevation={1}>
+          <Text variant="labelLarge" style={{ color: theme.colors.onSurface, marginBottom: 8 }}>
+            インサイト表示スタイル
+          </Text>
+          <View style={styles.radioRow}>
+            <RadioButton
+              value="tiles"
+              status={insightVisualizationStyle === 'tiles' ? 'checked' : 'unchecked'}
+              onPress={() => setInsightVisualizationStyle('tiles')}
+              color={theme.colors.primary}
+            />
+            <Text
+              variant="bodyMedium"
+              style={{ color: theme.colors.onSurface }}
+              onPress={() => setInsightVisualizationStyle('tiles')}
+            >
+              タイルビュー
+            </Text>
+          </View>
+          <View style={styles.radioRow}>
+            <RadioButton
+              value="bars"
+              status={insightVisualizationStyle === 'bars' ? 'checked' : 'unchecked'}
+              onPress={() => setInsightVisualizationStyle('bars')}
+              color={theme.colors.primary}
+            />
+            <Text
+              variant="bodyMedium"
+              style={{ color: theme.colors.onSurface }}
+              onPress={() => setInsightVisualizationStyle('bars')}
+            >
+              バービュー (ミキシングコンソール)
+            </Text>
+          </View>
+        </Surface>
 
         <Divider style={styles.divider} />
 

@@ -1,8 +1,11 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { Task, ChatMessage, PersonalityType, AIProviderConfig, ActiveConnection, ConnectionMode, RescheduleReason, SelfReportLevel } from '../types';
+import { Task, SubTask, ChatMessage, PersonalityType, AIProviderConfig, ActiveConnection, ConnectionMode, RescheduleReason, SelfReportLevel, SuperGoal, PendingSuggestion, AiReviewWeights, PortfolioType, AiReviewResult } from '../types';
 import { TaskCategory } from '../types/onboarding';
 import * as DB from '../db/database';
 import { useDatabase } from '../db/dbProvider';
+import { inferCategory } from '../services/categoryInference';
+import { executeAiReview, checkSanctuary } from '../services/aiReview';
+import { checkSuggestionThreshold } from '../services/suggestionThreshold';
 
 const DEFAULT_AI_CONFIG: AIProviderConfig = {
   connectionMode: 'hybrid',
@@ -11,6 +14,12 @@ const DEFAULT_AI_CONFIG: AIProviderConfig = {
   ollamaModel: 'llama4',
   geminiApiKey: '',
   geminiModel: 'gemini-1.5-flash',
+};
+
+const DEFAULT_WEIGHTS_BY_PERSONALITY: Record<PersonalityType, AiReviewWeights> = {
+  standard: { necessity: 1.0, feasibility: 1.0, decomposition: 1.0, efficiency: 1.0 },
+  yuru:     { necessity: 0.5, feasibility: 1.5, decomposition: 0.8, efficiency: 0.7 },
+  maji:     { necessity: 1.5, feasibility: 0.8, decomposition: 1.0, efficiency: 1.2 },
 };
 
 interface AppState {
@@ -33,6 +42,13 @@ interface AppState {
   selfReportDate: string | null;
   // Onboarding
   onboardingComplete: boolean;
+  // AI Review extensions
+  superGoals: SuperGoal[];
+  pendingSuggestions: PendingSuggestion[];
+  sanctuaryKeywords: string[];
+  aiReviewWeights: AiReviewWeights;
+  hasPendingReviewSuggestions: boolean;
+  insightVisualizationStyle: 'tiles' | 'bars';
 }
 
 interface AppContextType extends AppState {
@@ -54,6 +70,30 @@ interface AppContextType extends AppState {
   exitCareMode: () => void;
   setOnboardingComplete: () => void;
   updateTaskCategory: (taskId: string, categoryId: string) => void;
+  // Super Goals
+  addSuperGoal: (goal: SuperGoal) => void;
+  updateSuperGoal: (goal: SuperGoal) => void;
+  deleteSuperGoal: (goalId: string) => void;
+  // Pending Suggestions
+  addPendingSuggestion: (suggestion: PendingSuggestion) => void;
+  deletePendingSuggestion: (suggestionId: string) => void;
+  // Task extended fields
+  updateTaskPortfolioType: (taskId: string, portfolioType: PortfolioType) => void;
+  toggleTaskSanctuary: (taskId: string) => void;
+  updateTaskAiReviewCache: (taskId: string, cache: string | null) => void;
+  updateTaskSuperGoalId: (taskId: string, superGoalId: string | null) => void;
+  // SubTask mutations
+  addSubTasksToTask: (taskId: string, subTasks: SubTask[]) => void;
+  toggleSubTask: (taskId: string, subTaskId: string) => void;
+  deleteSubTask: (taskId: string, subTaskId: string) => void;
+  // Task field mutations
+  updateTaskTitle: (taskId: string, title: string) => void;
+  updateTaskDueDate: (taskId: string, dueDate: string | null) => void;
+  // Settings
+  setSanctuaryKeywords: (keywords: string[]) => void;
+  setAiReviewWeights: (weights: AiReviewWeights) => void;
+  setAiSubcategorySuggestions: (enabled: boolean) => void;
+  setInsightVisualizationStyle: (style: 'tiles' | 'bars') => void;
 }
 
 const MOCK_TASKS: Task[] = [
@@ -172,6 +212,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [selfReportDate, setSelfReportDate] = useState<string | null>(null);
   // Onboarding
   const [onboardingComplete, setOnboardingCompleteState] = useState(false);
+  // AI Review extensions
+  const [superGoals, setSuperGoals] = useState<SuperGoal[]>([]);
+  const [pendingSuggestions, setPendingSuggestions] = useState<PendingSuggestion[]>([]);
+  const [sanctuaryKeywords, setSanctuaryKeywordsState] = useState<string[]>([]);
+  const [aiReviewWeights, setAiReviewWeightsState] = useState<AiReviewWeights>(
+    DEFAULT_WEIGHTS_BY_PERSONALITY.standard
+  );
+  const [hasPendingReviewSuggestions, setHasPendingReviewSuggestions] = useState(false);
+  const [insightVisualizationStyle, setInsightVisualizationStyleState] = useState<'tiles' | 'bars'>('tiles');
 
   // -----------------------------------------------------------------------
   // Load data from DB on mount
@@ -219,6 +268,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setCategories(dbCategories);
         }
 
+        // Load super goals & pending suggestions
+        const [dbSuperGoals, dbPendingSuggestions] = await Promise.all([
+          DB.getAllSuperGoals(db),
+          DB.getAllPendingSuggestions(db),
+        ]);
+        if (!cancelled) {
+          setSuperGoals(dbSuperGoals);
+          setPendingSuggestions(dbPendingSuggestions);
+        }
+
         if (dbPersonality) {
           setPersonalityState(dbPersonality as PersonalityType);
         }
@@ -264,6 +323,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             setSelfReportState(dbSelfReport as SelfReportLevel);
             setSelfReportDate(dbSelfReportDate);
           }
+
+          // Load AI review settings
+          const [dbWeights, dbSanctuaryKeywords, dbInsightStyle] = await Promise.all([
+            DB.getSetting(db, 'ai_review_weights'),
+            DB.getSetting(db, 'sanctuary_keywords'),
+            DB.getSetting(db, 'insight_visualization_style'),
+          ]);
+          if (!cancelled) {
+            if (dbWeights) {
+              try {
+                setAiReviewWeightsState(JSON.parse(dbWeights));
+              } catch {
+                // Use personality-based default
+                var p = (dbPersonality || 'standard') as PersonalityType;
+                setAiReviewWeightsState(DEFAULT_WEIGHTS_BY_PERSONALITY[p]);
+              }
+            } else {
+              var p2 = (dbPersonality || 'standard') as PersonalityType;
+              setAiReviewWeightsState(DEFAULT_WEIGHTS_BY_PERSONALITY[p2]);
+            }
+            if (dbSanctuaryKeywords) {
+              try {
+                setSanctuaryKeywordsState(JSON.parse(dbSanctuaryKeywords));
+              } catch {
+                setSanctuaryKeywordsState([]);
+              }
+            }
+            if (dbInsightStyle === 'tiles' || dbInsightStyle === 'bars') {
+              setInsightVisualizationStyleState(dbInsightStyle);
+            }
+          }
         }
       } catch (e) {
         console.error('Failed to load data from DB:', e);
@@ -278,23 +368,142 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [db]);
 
   // -----------------------------------------------------------------------
+  // Background inference + AI review helper
+  // (defined before addTask so it can be referenced in addTask's deps)
+  // -----------------------------------------------------------------------
+
+  const runBackgroundInferenceAndReview = useCallback(async (taskId: string, taskTitle: string) => {
+    try {
+      // --- Phase 1: Sanctuary auto-detection ---
+      const currentTask = tasks.find(function (t) { return t.id === taskId; }) || { title: taskTitle } as Task;
+      const isSanc = checkSanctuary(currentTask, sanctuaryKeywords);
+      if (isSanc && !currentTask.isSanctuary) {
+        setTasks(function (prev) {
+          return prev.map(function (t) {
+            return t.id === taskId ? { ...t, isSanctuary: true } : t;
+          });
+        });
+        DB.updateTaskSanctuary(db, taskId, true).catch(console.error);
+      }
+
+      // --- Phase 2: Category inference ---
+      const result = await inferCategory(taskTitle, categories, aiConfig);
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          if (t.id === taskId) {
+            return {
+              ...t,
+              categoryId: result.categoryId || t.categoryId,
+              inferenceStatus: 'completed' as const,
+            };
+          }
+          return t;
+        });
+      });
+      if (result.categoryId) {
+        DB.updateTaskCategory(db, taskId, result.categoryId).catch(console.error);
+      }
+      DB.updateTaskInferenceStatus(db, taskId, 'completed').catch(console.error);
+
+      // --- Phase 3: Subcategory accumulation ---
+      if (result.action === 'new_subcategory' && result.suggestedName) {
+        const suggestion: PendingSuggestion = {
+          id: DB.generateId(),
+          taskId: taskId,
+          suggestedTagName: result.suggestedName,
+          reason: result.suggestedParentId ? 'parent:' + result.suggestedParentId : undefined,
+          createdAt: new Date().toISOString(),
+        };
+        setPendingSuggestions(function (prev) { return [suggestion, ...prev]; });
+        DB.insertPendingSuggestion(db, suggestion).catch(console.error);
+
+        // Threshold check
+        if (result.categoryId) {
+          const threshold = await checkSuggestionThreshold(db, result.suggestedName, result.categoryId);
+          if (threshold.shouldPropose) {
+            setHasPendingReviewSuggestions(true);
+          }
+        }
+      }
+
+      // --- Phase 4: AI review ---
+      const todayStr = new Date().toISOString().split('T')[0];
+      const updatedTask = tasks.find(function (t) { return t.id === taskId; });
+      const taskForReview = updatedTask || { ...currentTask, isSanctuary: isSanc };
+      const todayTasks = tasks.filter(function (t) {
+        return t.dueDate === todayStr && !t.completed;
+      });
+      const reviewResult = await executeAiReview(
+        taskForReview as Task,
+        aiConfig,
+        personality,
+        superGoals,
+        categories,
+        aiReviewWeights,
+        isCareMode,
+        todayTasks.length,
+      );
+      const cacheJson = JSON.stringify(reviewResult);
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          return t.id === taskId ? { ...t, aiReviewCache: cacheJson } : t;
+        });
+      });
+      DB.updateTaskAiReviewCache(db, taskId, cacheJson).catch(console.error);
+
+    } catch (e) {
+      console.error('Background inference/review failed:', e);
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          return t.id === taskId ? { ...t, inferenceStatus: 'failed' as const } : t;
+        });
+      });
+      DB.updateTaskInferenceStatus(db, taskId, 'failed').catch(console.error);
+    }
+  }, [db, categories, aiConfig, sanctuaryKeywords, personality, superGoals, aiReviewWeights, isCareMode, tasks]);
+
+  // -----------------------------------------------------------------------
+  // Startup retry for pending inference tasks
+  // -----------------------------------------------------------------------
+
+  useEffect(() => {
+    if (isLoading || categories.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const pendingTasks = await DB.getTasksByInferenceStatus(db, 'pending');
+        for (const task of pendingTasks) {
+          if (cancelled) break;
+          await runBackgroundInferenceAndReview(task.id, task.title);
+          await new Promise(function (resolve) { setTimeout(resolve, 500); });
+        }
+      } catch (e) {
+        console.error('Startup retry failed:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isLoading]);
+
+  // -----------------------------------------------------------------------
   // Mutations — optimistic update + async DB write
   // -----------------------------------------------------------------------
 
   const addTask = useCallback(
     (task: Task) => {
       // Auto-assign default category if not specified
-      let taskToInsert = task;
+      let taskToInsert = { ...task, inferenceStatus: 'pending' as const };
       if (!task.categoryId) {
         const defaultCat = categories.find(function (c) { return c.isDefault; });
         if (defaultCat) {
-          taskToInsert = { ...task, categoryId: defaultCat.id };
+          taskToInsert = { ...taskToInsert, categoryId: defaultCat.id };
         }
       }
       setTasks((prev) => [taskToInsert, ...prev]);
       DB.insertTask(db, taskToInsert).catch(console.error);
+      // Fire-and-forget background inference + review
+      runBackgroundInferenceAndReview(taskToInsert.id, taskToInsert.title).catch(console.error);
     },
-    [db, categories],
+    [db, categories, runBackgroundInferenceAndReview],
   );
 
   const toggleTask = useCallback(
@@ -505,6 +714,242 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [db],
   );
 
+  // -----------------------------------------------------------------------
+  // Super Goals CRUD
+  // -----------------------------------------------------------------------
+
+  const addSuperGoal = useCallback(
+    (goal: SuperGoal) => {
+      setSuperGoals(function (prev) { return [...prev, goal]; });
+      DB.insertSuperGoal(db, goal).catch(console.error);
+    },
+    [db],
+  );
+
+  const updateSuperGoalAction = useCallback(
+    (goal: SuperGoal) => {
+      setSuperGoals(function (prev) {
+        return prev.map(function (g) { return g.id === goal.id ? goal : g; });
+      });
+      DB.updateSuperGoal(db, goal).catch(console.error);
+    },
+    [db],
+  );
+
+  const deleteSuperGoal = useCallback(
+    (goalId: string) => {
+      setSuperGoals(function (prev) {
+        return prev.filter(function (g) { return g.id !== goalId; });
+      });
+      DB.deleteSuperGoalById(db, goalId).catch(console.error);
+    },
+    [db],
+  );
+
+  // -----------------------------------------------------------------------
+  // Pending Suggestions
+  // -----------------------------------------------------------------------
+
+  const addPendingSuggestion = useCallback(
+    (suggestion: PendingSuggestion) => {
+      setPendingSuggestions(function (prev) { return [suggestion, ...prev]; });
+      DB.insertPendingSuggestion(db, suggestion).catch(console.error);
+    },
+    [db],
+  );
+
+  const deletePendingSuggestion = useCallback(
+    (suggestionId: string) => {
+      setPendingSuggestions(function (prev) {
+        return prev.filter(function (s) { return s.id !== suggestionId; });
+      });
+      DB.deletePendingSuggestionById(db, suggestionId).catch(console.error);
+    },
+    [db],
+  );
+
+  // -----------------------------------------------------------------------
+  // Task extended field mutations
+  // -----------------------------------------------------------------------
+
+  const updateTaskPortfolioType = useCallback(
+    (taskId: string, portfolioType: PortfolioType) => {
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          return t.id === taskId ? { ...t, portfolioType: portfolioType } : t;
+        });
+      });
+      DB.updateTaskPortfolioType(db, taskId, portfolioType).catch(console.error);
+    },
+    [db],
+  );
+
+  const toggleTaskSanctuary = useCallback(
+    (taskId: string) => {
+      let newVal = false;
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          if (t.id === taskId) {
+            newVal = !t.isSanctuary;
+            return { ...t, isSanctuary: newVal };
+          }
+          return t;
+        });
+      });
+      DB.updateTaskSanctuary(db, taskId, newVal).catch(console.error);
+    },
+    [db],
+  );
+
+  const updateTaskAiReviewCacheAction = useCallback(
+    (taskId: string, cache: string | null) => {
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          return t.id === taskId ? { ...t, aiReviewCache: cache ?? undefined } : t;
+        });
+      });
+      DB.updateTaskAiReviewCache(db, taskId, cache).catch(console.error);
+    },
+    [db],
+  );
+
+  const updateTaskSuperGoalId = useCallback(
+    (taskId: string, superGoalId: string | null) => {
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          return t.id === taskId ? { ...t, superGoalId: superGoalId ?? undefined } : t;
+        });
+      });
+      DB.updateTaskSuperGoalId(db, taskId, superGoalId).catch(console.error);
+    },
+    [db],
+  );
+
+  // -----------------------------------------------------------------------
+  // SubTask mutations
+  // -----------------------------------------------------------------------
+
+  const addSubTasksToTask = useCallback(
+    (taskId: string, newSubTasks: SubTask[]) => {
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          if (t.id === taskId) {
+            return { ...t, subTasks: t.subTasks.concat(newSubTasks) };
+          }
+          return t;
+        });
+      });
+      DB.bulkInsertSubTasks(db, taskId, newSubTasks).catch(console.error);
+    },
+    [db],
+  );
+
+  const toggleSubTask = useCallback(
+    (taskId: string, subTaskId: string) => {
+      var newCompleted = false;
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          if (t.id === taskId) {
+            return {
+              ...t,
+              subTasks: t.subTasks.map(function (s) {
+                if (s.id === subTaskId) {
+                  newCompleted = !s.completed;
+                  return { ...s, completed: newCompleted };
+                }
+                return s;
+              }),
+            };
+          }
+          return t;
+        });
+      });
+      DB.updateSubTaskCompleted(db, subTaskId, newCompleted).catch(console.error);
+    },
+    [db],
+  );
+
+  const deleteSubTask = useCallback(
+    (taskId: string, subTaskId: string) => {
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          if (t.id === taskId) {
+            return {
+              ...t,
+              subTasks: t.subTasks.filter(function (s) { return s.id !== subTaskId; }),
+            };
+          }
+          return t;
+        });
+      });
+      DB.deleteSubTaskById(db, subTaskId).catch(console.error);
+    },
+    [db],
+  );
+
+  // -----------------------------------------------------------------------
+  // Task field mutations
+  // -----------------------------------------------------------------------
+
+  const updateTaskTitleAction = useCallback(
+    (taskId: string, title: string) => {
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          return t.id === taskId ? { ...t, title: title } : t;
+        });
+      });
+      DB.updateTaskTitle(db, taskId, title).catch(console.error);
+    },
+    [db],
+  );
+
+  const updateTaskDueDateAction = useCallback(
+    (taskId: string, dueDate: string | null) => {
+      setTasks(function (prev) {
+        return prev.map(function (t) {
+          return t.id === taskId ? { ...t, dueDate: dueDate ?? undefined } : t;
+        });
+      });
+      DB.updateTaskDueDate(db, taskId, dueDate).catch(console.error);
+    },
+    [db],
+  );
+
+  // -----------------------------------------------------------------------
+  // Settings mutations
+  // -----------------------------------------------------------------------
+
+  const setSanctuaryKeywords = useCallback(
+    (keywords: string[]) => {
+      setSanctuaryKeywordsState(keywords);
+      DB.setSetting(db, 'sanctuary_keywords', JSON.stringify(keywords)).catch(console.error);
+    },
+    [db],
+  );
+
+  const setAiReviewWeights = useCallback(
+    (weights: AiReviewWeights) => {
+      setAiReviewWeightsState(weights);
+      DB.setSetting(db, 'ai_review_weights', JSON.stringify(weights)).catch(console.error);
+    },
+    [db],
+  );
+
+  const setAiSubcategorySuggestions = useCallback(
+    (enabled: boolean) => {
+      DB.setSetting(db, 'ai_subcategory_suggestions', enabled ? '1' : '0').catch(console.error);
+    },
+    [db],
+  );
+
+  const setInsightVisualizationStyle = useCallback(
+    (style: 'tiles' | 'bars') => {
+      setInsightVisualizationStyleState(style);
+      DB.setSetting(db, 'insight_visualization_style', style).catch(console.error);
+    },
+    [db],
+  );
+
   return (
     <AppContext.Provider
       value={{
@@ -523,6 +968,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         selfReport,
         selfReportDate,
         onboardingComplete,
+        superGoals,
+        pendingSuggestions,
+        sanctuaryKeywords,
+        aiReviewWeights,
+        hasPendingReviewSuggestions,
+        insightVisualizationStyle,
         addTask,
         toggleTask,
         deleteTask,
@@ -541,6 +992,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         exitCareMode,
         setOnboardingComplete,
         updateTaskCategory,
+        addSuperGoal,
+        updateSuperGoal: updateSuperGoalAction,
+        deleteSuperGoal,
+        addPendingSuggestion,
+        deletePendingSuggestion,
+        updateTaskPortfolioType,
+        toggleTaskSanctuary,
+        updateTaskAiReviewCache: updateTaskAiReviewCacheAction,
+        updateTaskSuperGoalId,
+        addSubTasksToTask,
+        toggleSubTask,
+        deleteSubTask,
+        updateTaskTitle: updateTaskTitleAction,
+        updateTaskDueDate: updateTaskDueDateAction,
+        setSanctuaryKeywords,
+        setAiReviewWeights,
+        setAiSubcategorySuggestions,
+        setInsightVisualizationStyle,
       }}
     >
       {children}

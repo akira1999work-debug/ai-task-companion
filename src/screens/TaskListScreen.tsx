@@ -19,8 +19,11 @@ import {
 } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useApp } from '../context/AppContext';
-import type { Task, SubTask } from '../types';
+import { getGlowStyle } from '../utils/glowColor';
+import type { Task, SubTask, RootStackParamList } from '../types';
 
 function SubTaskItem({ subTask }: { subTask: SubTask }) {
   const theme = useTheme();
@@ -53,11 +56,13 @@ function TaskItem({
   onToggle,
   onDelete,
   onAiRefine,
+  onNavigate,
 }: {
   task: Task;
   onToggle: () => void;
   onDelete: () => void;
   onAiRefine: () => void;
+  onNavigate: () => void;
 }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
@@ -111,17 +116,26 @@ function TaskItem({
         style={{ transform: [{ translateX }] }}
         {...panResponder.panHandlers}
       >
+        {(function () {
+          var glow = getGlowStyle(task);
+          return (
         <Surface
           style={[
             styles.taskCard,
             {
               backgroundColor: theme.colors.surface,
               opacity: task.completed ? 0.5 : 1,
+              shadowColor: glow.shadowColor,
+              shadowOpacity: glow.shadowOpacity,
+              shadowRadius: glow.shadowRadius,
+              shadowOffset: { width: 0, height: 2 },
             },
           ]}
           elevation={1}
         >
-          <Pressable onPress={() => setExpanded(!expanded)}>
+          {/* Glow color bar */}
+          <View style={[styles.glowBar, { backgroundColor: glow.color }]} />
+          <Pressable onPress={onNavigate}>
             <View style={styles.taskHeader}>
               <IconButton
                 icon={task.completed ? 'checkbox-marked-circle' : 'checkbox-blank-circle-outline'}
@@ -193,6 +207,7 @@ function TaskItem({
 
           {/* Expand indicator for items with subtasks */}
           {task.subTasks.length > 0 && (
+            <Pressable onPress={() => setExpanded(!expanded)}>
             <View style={styles.expandHint}>
               <MaterialCommunityIcons
                 name={expanded ? 'chevron-up' : 'chevron-down'}
@@ -203,8 +218,11 @@ function TaskItem({
                 サブタスク {task.subTasks.filter(s => s.completed).length}/{task.subTasks.length}
               </Text>
             </View>
+            </Pressable>
           )}
         </Surface>
+          );
+        })()}
       </Animated.View>
     </View>
   );
@@ -212,6 +230,7 @@ function TaskItem({
 
 export default function TaskListScreen() {
   const theme = useTheme();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { tasks, toggleTask, deleteTask } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
@@ -290,6 +309,7 @@ export default function TaskListScreen() {
             onToggle={() => toggleTask(item.id)}
             onDelete={() => deleteTask(item.id)}
             onAiRefine={() => handleAiRefine(item)}
+            onNavigate={() => navigation.navigate('TaskDetail', { taskId: item.id })}
           />
         )}
         contentContainerStyle={styles.listContent}
@@ -371,6 +391,15 @@ const styles = StyleSheet.create({
   taskCard: {
     borderRadius: 16,
     overflow: 'hidden',
+  },
+  glowBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 16,
   },
   taskHeader: {
     flexDirection: 'row',
