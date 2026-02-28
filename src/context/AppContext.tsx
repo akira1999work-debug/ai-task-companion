@@ -8,12 +8,12 @@ import { executeAiReview, checkSanctuary } from '../services/aiReview';
 import { checkSuggestionThreshold } from '../services/suggestionThreshold';
 
 const DEFAULT_AI_CONFIG: AIProviderConfig = {
-  connectionMode: 'hybrid',
+  connectionMode: 'cloud',
   ollamaHost: '127.0.0.1',
   ollamaPort: '11434',
-  ollamaModel: 'llama4',
+  ollamaModel: 'gemma3:4b',
   geminiApiKey: '',
-  geminiModel: 'gemini-1.5-flash',
+  geminiModel: 'gemini-2.0-flash',
 };
 
 const DEFAULT_WEIGHTS_BY_PERSONALITY: Record<PersonalityType, AiReviewWeights> = {
