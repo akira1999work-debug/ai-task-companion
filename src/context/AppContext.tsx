@@ -12,7 +12,7 @@ const DEFAULT_AI_CONFIG: AIProviderConfig = {
   ollamaHost: '127.0.0.1',
   ollamaPort: '11434',
   ollamaModel: 'gemma3:4b',
-  geminiApiKey: '',
+  geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '',
   geminiModel: 'gemini-2.0-flash',
 };
 
