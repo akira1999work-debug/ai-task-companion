@@ -17,11 +17,45 @@ export class WebDatabase {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   async init(): Promise<void> {
-    var SQL = await initSqlJs({
-      locateFile: function (file: string) {
-        return 'https://sql.js.org/dist/' + file;
-      },
-    });
+    var CDN_URLS = [
+      'https://sql.js.org/dist/',
+      'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.14.0/dist/',
+      'https://cdn.jsdelivr.net/npm/sql.js@1.14.0/dist/',
+    ];
+    var SQL: any = null;
+
+    // Strategy 1: Try CDN-hosted WASM versions
+    for (var i = 0; i < CDN_URLS.length; i++) {
+      try {
+        var url = CDN_URLS[i];
+        SQL = await initSqlJs({
+          locateFile: function (file: string) {
+            return url + file;
+          },
+        });
+        console.log('sql.js loaded from CDN:', CDN_URLS[i]);
+        break;
+      } catch (e) {
+        console.warn('sql.js CDN failed (' + CDN_URLS[i] + '):', e);
+      }
+    }
+
+    // Strategy 2: Fall back to asm.js (pure JS, no WASM/CDN needed)
+    if (!SQL) {
+      try {
+        var initSqlAsmJs = require('sql.js/dist/sql-asm.js');
+        SQL = await initSqlAsmJs();
+        console.log('sql.js loaded via asm.js fallback (no WASM)');
+      } catch (e2) {
+        console.error('sql.js asm.js fallback also failed:', e2);
+      }
+    }
+
+    if (!SQL) {
+      throw new Error(
+        'データベースの初期化に失敗しました。ネットワーク接続を確認してページを再読み込みしてください。'
+      );
+    }
 
     // Try to restore from localStorage
     var saved = localStorage.getItem(STORAGE_KEY);

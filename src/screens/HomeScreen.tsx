@@ -24,7 +24,7 @@ import {
 } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import Haptics from '../utils/haptics';
 import { useApp } from '../context/AppContext';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';

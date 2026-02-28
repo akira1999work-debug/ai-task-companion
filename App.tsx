@@ -1,6 +1,7 @@
 import React, { Suspense } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { PaperProvider } from 'react-native-paper';
+import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { initializeDatabase } from './src/db/database';
 import { DatabaseProvider } from './src/db/dbProvider';
@@ -30,12 +31,17 @@ function LoadingFallback() {
 
 export default function App() {
   return (
-    <Suspense fallback={<LoadingFallback />}>
-      <DatabaseProvider databaseName="aitas.db" onInit={initializeDatabase}>
-        <AppProvider>
-          <ThemedApp />
-        </AppProvider>
-      </DatabaseProvider>
-    </Suspense>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics || {
+      frame: { x: 0, y: 0, width: 0, height: 0 },
+      insets: { top: 0, bottom: 0, left: 0, right: 0 },
+    }}>
+      <Suspense fallback={<LoadingFallback />}>
+        <DatabaseProvider databaseName="aitas.db" onInit={initializeDatabase}>
+          <AppProvider>
+            <ThemedApp />
+          </AppProvider>
+        </DatabaseProvider>
+      </Suspense>
+    </SafeAreaProvider>
   );
 }
