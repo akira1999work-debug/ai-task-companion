@@ -1,13 +1,16 @@
-import React from 'react';
+import React, { Suspense } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { PaperProvider } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
+import { initializeDatabase } from './src/db/database';
+import { DatabaseProvider } from './src/db/dbProvider';
 import { AppProvider, useApp } from './src/context/AppContext';
 import AppNavigator from './src/navigation/AppNavigator';
-import { themes } from './src/theme';
+import { themes, getCareTheme } from './src/theme';
 
 function ThemedApp() {
-  const { personality } = useApp();
-  const theme = themes[personality];
+  const { personality, isCareMode } = useApp();
+  const theme = isCareMode ? getCareTheme(personality) : themes[personality];
 
   return (
     <PaperProvider theme={theme}>
@@ -17,10 +20,22 @@ function ThemedApp() {
   );
 }
 
+function LoadingFallback() {
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <ActivityIndicator size="large" />
+    </View>
+  );
+}
+
 export default function App() {
   return (
-    <AppProvider>
-      <ThemedApp />
-    </AppProvider>
+    <Suspense fallback={<LoadingFallback />}>
+      <DatabaseProvider databaseName="aitas.db" onInit={initializeDatabase}>
+        <AppProvider>
+          <ThemedApp />
+        </AppProvider>
+      </DatabaseProvider>
+    </Suspense>
   );
 }

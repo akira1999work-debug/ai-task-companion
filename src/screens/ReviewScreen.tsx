@@ -18,61 +18,55 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
 import type { ChatMessage } from '../types';
-
-const AI_REPLY_POOL = {
-  standard: [
-    '今日は3つのタスクを完了しましたね。素晴らしいです！特に「企画書のドラフト」は大きな進捗ですね。',
-    'タスクの優先順位を見てみましょう。明日は「チームMTGの準備」を朝一でやると、午後が楽になりますよ。',
-    '繰り返しタスクの「朝のストレッチ」、3日連続で達成していますね。この調子です！',
-    '最近のペースを見ると、少し詰め込みすぎかもしれません。無理せずいきましょう。',
-  ],
-  yuru: [
-    'わ〜！今日3つも終わらせたの？すごすぎ〜✨ えらいえらい〜💕',
-    'ね〜明日のMTGの準備、朝イチでやっちゃお？そしたら午後はゆるっとできるよ〜😊',
-    'ストレッチ3日連続！？ まじ？ 推せる〜〜〜🎉 その調子だよ〜！',
-    'ちょっと〜最近がんばりすぎじゃない？たまにはだらっとしてもいいんだからね〜🌸',
-  ],
-  maji: [
-    '本日の完了タスク数: 3件。生産性は良好です。特に「企画書のドラフト」の完了は評価に値します。',
-    '明日の最適なタスク順序を提案します。09:00 MTG準備 → 10:30 企画書レビュー → 14:00 その他。',
-    '習慣タスク「朝のストレッチ」: 3日連続達成。継続率を維持してください。',
-    '直近のタスク消化率が120%です。バーンアウトのリスクがあります。休息を計画に組み込みましょう。',
-  ],
-};
+import { generateId } from '../db/database';
+import { sendMessage } from '../services/aiProvider';
 
 export default function ReviewScreen() {
   const theme = useTheme();
-  const { chatMessages, addChatMessage, personality, tasks } = useApp();
+  const { chatMessages, addChatMessage, personality, tasks, aiConfig, setActiveConnection, setIsAiProcessing } = useApp();
   const [inputText, setInputText] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!inputText.trim()) return;
+    const trimmed = inputText.trim();
+    setInputText('');
 
     const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      text: inputText.trim(),
+      id: generateId(),
+      text: trimmed,
       sender: 'user',
       timestamp: new Date().toISOString(),
     };
 
     addChatMessage(userMessage);
-    setInputText('');
     setIsAiTyping(true);
+    setIsAiProcessing(true);
 
-    // Simulate AI response delay
-    setTimeout(() => {
-      const replies = AI_REPLY_POOL[personality];
+    try {
+      const result = await sendMessage(aiConfig, personality, tasks, chatMessages, trimmed, 'review');
+      setActiveConnection(result.source);
       const aiMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        text: replies[Math.floor(Math.random() * replies.length)],
+        id: generateId(),
+        text: result.text,
         sender: 'ai',
         timestamp: new Date().toISOString(),
       };
       addChatMessage(aiMessage);
+    } catch (e) {
+      const errorText = e instanceof Error ? e.message : 'AI応答の取得に失敗しました';
+      const aiMessage: ChatMessage = {
+        id: generateId(),
+        text: errorText,
+        sender: 'ai',
+        timestamp: new Date().toISOString(),
+      };
+      addChatMessage(aiMessage);
+    } finally {
       setIsAiTyping(false);
-    }, 1200);
+      setIsAiProcessing(false);
+    }
   };
 
   const getAiName = () => {

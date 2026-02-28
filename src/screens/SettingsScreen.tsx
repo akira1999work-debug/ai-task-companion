@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import {
   Text,
@@ -9,11 +9,14 @@ import {
   IconButton,
   RadioButton,
   List,
+  TextInput,
+  Button,
 } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
-import type { PersonalityType, PersonalityConfig } from '../types';
+import type { PersonalityType, PersonalityConfig, ConnectionMode } from '../types';
+import { checkOllamaConnection } from '../services/aiProvider';
 import { useNavigation } from '@react-navigation/native';
 
 const PERSONALITIES: PersonalityConfig[] = [
@@ -121,7 +124,28 @@ function PersonalityCard({
 export default function SettingsScreen() {
   const theme = useTheme();
   const navigation = useNavigation();
-  const { personality, setPersonality, googleCalendarEnabled, setGoogleCalendarEnabled } = useApp();
+  const {
+    personality, setPersonality,
+    googleCalendarEnabled, setGoogleCalendarEnabled,
+    aiConfig, setConnectionMode, setOllamaHost, setOllamaPort, setGeminiApiKey,
+  } = useApp();
+
+  const [localHost, setLocalHost] = useState(aiConfig.ollamaHost);
+  const [localPort, setLocalPort] = useState(aiConfig.ollamaPort);
+  const [localApiKey, setLocalApiKey] = useState(aiConfig.geminiApiKey);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
+
+  const handleConnectionTest = async () => {
+    setIsTesting(true);
+    setTestResult(null);
+    const ok = await checkOllamaConnection(aiConfig.ollamaHost, aiConfig.ollamaPort);
+    setTestResult(ok ? 'Ollama接続成功' : 'Ollama接続失敗 — サーバーが起動していることを確認してください');
+    setIsTesting(false);
+  };
+
+  const showOllamaSettings = aiConfig.connectionMode === 'local' || aiConfig.connectionMode === 'hybrid';
+  const showGeminiSettings = aiConfig.connectionMode === 'cloud' || aiConfig.connectionMode === 'hybrid';
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -156,6 +180,120 @@ export default function SettingsScreen() {
             onSelect={() => setPersonality(p.id)}
           />
         ))}
+
+        <Divider style={styles.divider} />
+
+        {/* AI Connection section */}
+        <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>
+          AI接続
+        </Text>
+        <Text variant="bodySmall" style={[styles.sectionDesc, { color: theme.colors.outline }]}>
+          AIプロバイダーの接続設定
+        </Text>
+
+        <Surface style={[styles.settingRow, { backgroundColor: theme.colors.surface, flexDirection: 'column', alignItems: 'stretch' }]} elevation={1}>
+          <View style={styles.radioRow}>
+            <RadioButton
+              value="local"
+              status={aiConfig.connectionMode === 'local' ? 'checked' : 'unchecked'}
+              onPress={() => setConnectionMode('local')}
+              color={theme.colors.primary}
+            />
+            <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }} onPress={() => setConnectionMode('local')}>
+              ローカル (Ollama)
+            </Text>
+          </View>
+          <View style={styles.radioRow}>
+            <RadioButton
+              value="cloud"
+              status={aiConfig.connectionMode === 'cloud' ? 'checked' : 'unchecked'}
+              onPress={() => setConnectionMode('cloud')}
+              color={theme.colors.primary}
+            />
+            <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }} onPress={() => setConnectionMode('cloud')}>
+              クラウド (Gemini)
+            </Text>
+          </View>
+          <View style={styles.radioRow}>
+            <RadioButton
+              value="hybrid"
+              status={aiConfig.connectionMode === 'hybrid' ? 'checked' : 'unchecked'}
+              onPress={() => setConnectionMode('hybrid')}
+              color={theme.colors.primary}
+            />
+            <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }} onPress={() => setConnectionMode('hybrid')}>
+              ハイブリッド (自動)
+            </Text>
+          </View>
+        </Surface>
+
+        {showOllamaSettings && (
+          <Surface style={[styles.settingRow, { backgroundColor: theme.colors.surface, flexDirection: 'column', alignItems: 'stretch' }]} elevation={1}>
+            <Text variant="labelLarge" style={{ color: theme.colors.onSurface, marginBottom: 8 }}>
+              Ollama設定
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TextInput
+                mode="outlined"
+                label="ホスト"
+                value={localHost}
+                onChangeText={setLocalHost}
+                onBlur={() => setOllamaHost(localHost)}
+                style={{ flex: 2 }}
+                dense
+              />
+              <TextInput
+                mode="outlined"
+                label="ポート"
+                value={localPort}
+                onChangeText={setLocalPort}
+                onBlur={() => setOllamaPort(localPort)}
+                keyboardType="numeric"
+                style={{ flex: 1 }}
+                dense
+              />
+            </View>
+            <Button
+              mode="outlined"
+              onPress={handleConnectionTest}
+              loading={isTesting}
+              disabled={isTesting}
+              style={{ marginTop: 8, alignSelf: 'flex-start' }}
+              icon="connection"
+              compact
+            >
+              接続テスト
+            </Button>
+            {testResult && (
+              <Text
+                variant="bodySmall"
+                style={{
+                  marginTop: 4,
+                  color: testResult.includes('成功') ? '#22C55E' : theme.colors.error,
+                }}
+              >
+                {testResult}
+              </Text>
+            )}
+          </Surface>
+        )}
+
+        {showGeminiSettings && (
+          <Surface style={[styles.settingRow, { backgroundColor: theme.colors.surface, flexDirection: 'column', alignItems: 'stretch' }]} elevation={1}>
+            <Text variant="labelLarge" style={{ color: theme.colors.onSurface, marginBottom: 8 }}>
+              Gemini設定
+            </Text>
+            <TextInput
+              mode="outlined"
+              label="APIキー"
+              value={localApiKey}
+              onChangeText={setLocalApiKey}
+              onBlur={() => setGeminiApiKey(localApiKey)}
+              secureTextEntry
+              dense
+            />
+          </Surface>
+        )}
 
         <Divider style={styles.divider} />
 
@@ -347,5 +485,10 @@ const styles = StyleSheet.create({
   settingText: {
     marginLeft: 12,
     flex: 1,
+  },
+  radioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 2,
   },
 });

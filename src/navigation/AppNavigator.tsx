@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -9,6 +9,7 @@ import HomeScreen from '../screens/HomeScreen';
 import TaskListScreen from '../screens/TaskListScreen';
 import ReviewScreen from '../screens/ReviewScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import OnboardingScreen from '../screens/OnboardingScreen';
 import { useApp } from '../context/AppContext';
 import type { RootTabParamList, RootStackParamList } from '../types';
 
@@ -43,7 +44,7 @@ function MainTabs() {
         options={{
           tabBarLabel: 'ホーム',
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="microphone" size={size} color={color} />
+            <MaterialCommunityIcons name="play-circle-outline" size={size} color={color} />
           ),
         }}
       />
@@ -71,12 +72,27 @@ function MainTabs() {
   );
 }
 
+function OnboardingWrapper({ navigation }: { navigation: any }) {
+  const { setOnboardingComplete } = useApp();
+
+  const handleComplete = useCallback(() => {
+    setOnboardingComplete();
+    navigation.replace('MainTabs');
+  }, [navigation, setOnboardingComplete]);
+
+  return <OnboardingScreen onComplete={handleComplete} />;
+}
+
 export default function AppNavigator() {
   const theme = useTheme();
+  const { onboardingComplete, isLoading } = useApp();
 
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {!isLoading && !onboardingComplete ? (
+          <Stack.Screen name="Onboarding" component={OnboardingWrapper} />
+        ) : null}
         <Stack.Screen name="MainTabs" component={MainTabs} />
         <Stack.Screen
           name="Settings"
