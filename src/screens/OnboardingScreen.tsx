@@ -17,7 +17,7 @@ import {
   useTheme,
   ActivityIndicator,
 } from 'react-native-paper';
-import { useSQLiteContext } from 'expo-sqlite';
+import { useDatabase } from '../db/dbProvider';
 import { useApp } from '../context/AppContext';
 import { generateId } from '../db/database';
 import * as DB from '../db/database';
@@ -51,7 +51,7 @@ interface OnboardingScreenProps {
 
 export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
   const theme = useTheme();
-  const db = useSQLiteContext();
+  const db = useDatabase();
   const { personality, aiConfig } = useApp();
 
   // Onboarding state
